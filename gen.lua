@@ -1,4 +1,18 @@
-require 'gen_data'
+schema_file = nil
+package_name = nil
+output_dir = '.'
+
+for i=1,#arg do
+    if arg[i] == '-s' then
+        schema_file = arg[i+1]
+    elseif arg[i] == '-p' then
+        package_name = arg[i+1]
+    elseif arg[i] == '-o' then
+        output_dir = arg[i+1]
+    end
+end
+
+require( schema_file )
 
 function to_camel_case( ident )
     function fn( s )
@@ -22,6 +36,7 @@ end
 
 function gen( str, msg )
     str = string.gsub( str, '$CPP_MESSAGE', cpp_message )
+    str = string.gsub( str, '$CPP_NAMESPACE', package_name )       
     str = string.gsub( str, '$PROTO_MESSAGE', proto_message )
     if msg ~= nil then
         id = msg[ 'id' ]
@@ -50,13 +65,15 @@ function gen_init( msg )
 end
 
 function gen_proto( msg )
-    io.output( msg .. '.proto' )
+    io.output( output_dir .. '/' .. msg .. '.proto' )
     gen_init( msg )
 
     _header =
         'syntax = "proto2";\n'
     _import =
         'import "$CPP_TYPE.proto";\n'
+    _package =
+        'package ' .. package_name .. ';\n'
     _message =
         'message $PROTO_MESSAGE\n' ..
         '{\n'
@@ -71,6 +88,9 @@ function gen_proto( msg )
             gen( _import, v )
         end
     end
+    if package_name ~= nil then
+        --gen( _package )
+    end
     gen( _message )
     for k, v in pairs( _G[ msg ] ) do
         gen( _body, v )
@@ -78,13 +98,14 @@ function gen_proto( msg )
     gen( _footer )
 end
 
-function gen_cpp( msg, child )
-    io.output( msg .. '.hpp' )
+function gen_cpp( msg, parent )
+    io.output( output_dir .. '/' .. msg .. '.hpp' )
     gen_init( msg )
 
     _include =
         '#include "$CPP_TYPE.hpp"\n'
     _class_header =
+        '#pragma once\n' ..
         '#include "$CPP_MESSAGE.pb.h"\n\n' ..
         'class $CPP_MESSAGE\n' ..
         '{\n' ..
@@ -92,6 +113,9 @@ function gen_cpp( msg, child )
         'public:\n'
     _size_proto = 
         '    size_t size();\n'
+    _serialization_proto =
+        '    void parse( const char*, size_t );\n' ..
+        '    void serialize( char*, size_t ) const;\n'
     _primitive_field_proto =
         '    bool has_$FIELD() const;\n' ..
         '    void clear_$FIELD();\n' ..
@@ -118,11 +142,19 @@ function gen_cpp( msg, child )
         '    out << msg.pb_.DebugString();\n' ..
         '    return out;\n' ..
         '}\n'
-
     _size_impl = 
         'inline size_t $CPP_MESSAGE::size()\n' ..
         '{\n' ..
         '    return pb_.ByteSize();\n' ..
+        '}\n'
+    _serialization_impl =
+        'inline void $CPP_MESSAGE::parse( const char* buf, size_t len )\n' ..
+        '{\n' ..
+        '    pb_.ParseFromArray( buf, len );\n' ..
+        '}\n' ..
+        'inline void $CPP_MESSAGE::serialize( char* buf, size_t len ) const\n' ..
+        '{\n' ..
+        '    pb_.SerializeToArray( buf, len );\n' ..
         '}\n'
     _primitive_field_impl =
         'inline bool $CPP_MESSAGE::has_$FIELD() const\n' ..
@@ -189,7 +221,12 @@ function gen_cpp( msg, child )
         '    return $CPP_TYPE( *pb_.mutable_$FIELD( i ) );\n' ..
         '}\n'
 
-    if child then
+    if parent then
+        _class_footer =
+            'private:\n' ..
+            '    $PROTO_MESSAGE pb_;\n' ..
+            _class_footer
+    else
         _class_header = _class_header ..
             '    $CPP_MESSAGE( $PROTO_MESSAGE& );\n'
         _class_footer =
@@ -199,11 +236,6 @@ function gen_cpp( msg, child )
             'inline $CPP_MESSAGE::$CPP_MESSAGE( $PROTO_MESSAGE& pb ) : pb_( pb )\n' ..
             '{\n' ..
             '}\n'
-    else
-        _class_footer =
-            'private:\n' ..
-            '    $PROTO_MESSAGE pb_;\n' ..
-            _class_footer
     end
 
     for k, v in pairs( _G[ msg ] ) do
@@ -214,6 +246,7 @@ function gen_cpp( msg, child )
 
     gen( _class_header )
     gen( _size_proto )
+    gen( _serialization_proto )
 
     for k, v in pairs( _G[ msg ] ) do
         if is_primitive_type( v ) then
@@ -233,6 +266,7 @@ function gen_cpp( msg, child )
 
     gen( _class_footer )
     gen( _size_impl )
+    gen( _serialization_impl )
 
     for k, v in pairs( _G[ msg ] ) do
         if is_primitive_type( v ) then
@@ -251,12 +285,10 @@ function gen_cpp( msg, child )
     end
 end
 
-gen_proto( 'key_value' )
-gen_proto( 'packet_header' )
-gen_proto( 'message_header' )
-gen_proto( 'new_order_single' )
+for k, v in pairs( schema ) do
+    gen_proto( v['name'] )
+end
 
-gen_cpp( 'key_value', true )
-gen_cpp( 'packet_header', false )
-gen_cpp( 'message_header', false )
-gen_cpp( 'new_order_single', false )
+for k, v in pairs( schema ) do
+    gen_cpp( v['name'], v['parent'] )
+end
