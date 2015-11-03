@@ -102,20 +102,22 @@ function gen_cpp( msg, parent )
     io.output( output_dir .. '/' .. msg .. '.hpp' )
     gen_init( msg )
 
+    _pragma =
+        '#pragma once\n'
     _include =
+        '#include "message.hpp"\n' ..
         '#include "$CPP_TYPE.hpp"\n'
     _class_header =
-        '#pragma once\n' ..
         '#include "$CPP_MESSAGE.pb.h"\n\n' ..
-        'class $CPP_MESSAGE\n' ..
+        'class $CPP_MESSAGE : public message\n' ..
         '{\n' ..
         'friend std::ostream& operator<<( std::ostream&, const $CPP_MESSAGE& );\n' ..
         'public:\n'
     _size_proto = 
         '    size_t size();\n'
     _serialization_proto =
-        '    void parse( const char*, size_t );\n' ..
-        '    void serialize( char*, size_t ) const;\n'
+        '    void encode( char*, size_t ) const;\n' ..
+        '    void decode( const char*, size_t );\n'
     _primitive_field_proto =
         '    bool has_$FIELD() const;\n' ..
         '    void clear_$FIELD();\n' ..
@@ -148,13 +150,13 @@ function gen_cpp( msg, parent )
         '    return pb_.ByteSize();\n' ..
         '}\n'
     _serialization_impl =
-        'inline void $CPP_MESSAGE::parse( const char* buf, size_t len )\n' ..
-        '{\n' ..
-        '    pb_.ParseFromArray( buf, len );\n' ..
-        '}\n' ..
-        'inline void $CPP_MESSAGE::serialize( char* buf, size_t len ) const\n' ..
+        'inline void $CPP_MESSAGE::encode( char* buf, size_t len ) const\n' ..
         '{\n' ..
         '    pb_.SerializeToArray( buf, len );\n' ..
+        '}\n' ..
+        'inline void $CPP_MESSAGE::decode( const char* buf, size_t len )\n' ..
+        '{\n' ..
+        '    pb_.ParseFromArray( buf, len );\n' ..
         '}\n'
     _primitive_field_impl =
         'inline bool $CPP_MESSAGE::has_$FIELD() const\n' ..
@@ -222,10 +224,16 @@ function gen_cpp( msg, parent )
         '}\n'
 
     if parent then
+        _class_header = _class_header ..
+            '    $CPP_MESSAGE();\n'
         _class_footer =
             'private:\n' ..
             '    $PROTO_MESSAGE pb_;\n' ..
-            _class_footer
+            _class_footer ..
+            'inline $CPP_MESSAGE::$CPP_MESSAGE() :\n' ..
+            '    message( \"$CPP_MESSAGE\" )\n' ..
+            '{\n' ..
+            '}\n'
     else
         _class_header = _class_header ..
             '    $CPP_MESSAGE( $PROTO_MESSAGE& );\n'
@@ -233,10 +241,14 @@ function gen_cpp( msg, parent )
             'private:\n' ..
             '    $PROTO_MESSAGE& pb_;\n' ..
             _class_footer ..
-            'inline $CPP_MESSAGE::$CPP_MESSAGE( $PROTO_MESSAGE& pb ) : pb_( pb )\n' ..
+            'inline $CPP_MESSAGE::$CPP_MESSAGE( $PROTO_MESSAGE& pb ) :\n' ..
+            '    message( \"$CPP_MESSAGE\" ),\n' ..
+            '    pb_( pb )\n' ..
             '{\n' ..
             '}\n'
     end
+
+    gen( _pragma )
 
     for k, v in pairs( _G[ msg ] ) do
         if not is_primitive_type( v ) then
